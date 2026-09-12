@@ -1,6 +1,9 @@
 import prisma from '../config/prisma.js';
 
-const gameDataInclude = { progression: true, universe: true };
+const gameDataInclude = {
+  progression: true,
+  universe: true,
+};
 
 export function findUserByFirebaseUid(firebaseUid) {
   return prisma.user.findUnique({ where: { firebaseUid }, include: gameDataInclude });
@@ -18,7 +21,7 @@ export async function createUserWithInitialData(firebaseUser) {
         lastLoginAt: now,
         lastActivityAt: now,
         progression: { create: {} },
-        universe: { create: { currentUniverseState: {} } },
+        universe: { create: {} },
       },
       include: gameDataInclude,
     });

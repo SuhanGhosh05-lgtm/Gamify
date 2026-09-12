@@ -3,6 +3,8 @@ import Hero from '../components/hero';
 import Navbar from '../components/navbar';
 import UserStats from '../components/UserStats';
 import { useAuth } from '../context/auth-context';
+import { authenticatedRequest } from '../services/api';
+import { useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
   const { firebaseUser, gameData, loading, fetchStats } = useAuth();
@@ -10,6 +12,8 @@ export default function Dashboard() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [error, setError] = useState('');
   const [exploreMessage, setExploreMessage] = useState('');
+  const [enteringUniverse, setEnteringUniverse] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!firebaseUser) { setStats(null); return; }
@@ -20,6 +24,15 @@ export default function Dashboard() {
   if (loading) return <div className="page dashboard-page"><Navbar /><p className="page-loader">Loading your journey…</p></div>;
 
   const exploreStats = () => document.getElementById('journey-stats')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const enterUniverse = async () => {
+    if (!firebaseUser || enteringUniverse) return;
+    setEnteringUniverse(true); setError('');
+    try {
+      const result = await authenticatedRequest('/api/universe/entry', firebaseUser);
+      navigate(result.onboardingCompleted ? '/universe' : '/onboarding', { state: result.onboardingCompleted ? { universe: result.universe } : { taxonomy: result.taxonomy } });
+    } catch (requestError) { setError(requestError.message); }
+    finally { setEnteringUniverse(false); }
+  };
 
   return (
     <div className="page dashboard-page">
@@ -27,7 +40,7 @@ export default function Dashboard() {
       {firebaseUser && statsLoading && <p className="page-loader">Restoring your universe…</p>}
       {firebaseUser && stats && !statsLoading && <>
         <Hero onExplore={exploreStats} playerName={stats.user.displayName || 'Adventurer'} />
-        <UserStats data={stats} />
+        <UserStats data={stats} onEnterUniverse={enterUniverse} />
       </>}
       {firebaseUser && error && <main className="dashboard-error"><h1>Your journey needs attention.</h1><p>{error}</p></main>}
       {!firebaseUser && <Hero onExplore={() => setExploreMessage('Please enter or register to start exploring your journey.')} exploreMessage={exploreMessage} />}

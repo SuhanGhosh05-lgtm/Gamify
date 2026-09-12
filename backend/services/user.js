@@ -15,9 +15,10 @@ export async function getUserDashboardStats(firebaseUid) {
       discipline: progression.discipline, vitality: progression.vitality, creativity: progression.creativity,
     },
     universe: universe && {
-      currentRegion: universe.currentRegion, currentQuest: universe.currentQuest,
-      regionsUnlocked: universe.regionsUnlocked, questsCompleted: universe.questsCompleted,
-      achievementsUnlocked: universe.achievementsUnlocked, currentUniverseState: universe.currentUniverseState,
+      id: universe.id,
+      currentRegion: universe.currentRegion,
+      questsCompleted: universe.questsCompleted,
+      achievementsUnlocked: universe.achievementsUnlocked,
     },
   };
 }
