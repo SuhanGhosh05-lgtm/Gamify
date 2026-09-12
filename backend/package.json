@@ -1,0 +1,22 @@
+{
+  "name": "life-rpg-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "prisma:format": "prisma format",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "6.16.0",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "firebase-admin": "13.4.0"
+  },
+  "devDependencies": {
+    "prisma": "6.16.0"
+  }
+}
