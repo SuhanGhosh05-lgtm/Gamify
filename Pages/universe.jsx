@@ -1,0 +1,8 @@
+import { useState } from 'react';
+import { generateUniverse } from './service/adaptivequest';
+export default function Onboarding({ user, onComplete }) {
+  const [form, setForm] = useState({ interests: '', primaryGoal: '', dailyAvailableTime: '30 minutes', difficulty: 'Balanced' }); const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const update = (event) => setForm({ ...form, [event.target.name]: event.target.value });
+  const submit = async (event) => { event.preventDefault(); if (!form.interests.trim() || !form.primaryGoal.trim()) return setError('Add at least one interest and your primary goal.'); setBusy(true); setError(''); try { await onComplete(form, generateUniverse(form)); } catch (err) { setError(err.message); setBusy(false); } };
+  return <main><h1>Build your universe</h1><p>Welcome, {user.displayName || 'Adventurer'}.</p><form onSubmit={submit}><label>Interests (comma separated)<input name="interests" value={form.interests} onChange={update} required /></label><label>Primary goal<input name="primaryGoal" value={form.primaryGoal} onChange={update} required /></label><label>Daily available time<select name="dailyAvailableTime" value={form.dailyAvailableTime} onChange={update}><option>15 minutes</option><option>30 minutes</option><option>1 hour</option><option>2+ hours</option></select></label><label>Preferred difficulty<select name="difficulty" value={form.difficulty} onChange={update}><option>Gentle</option><option>Balanced</option><option>Challenging</option></select></label><button disabled={busy}>{busy ? 'Creating universe…' : 'Begin adventure'}</button>{error && <p role="alert">{error}</p>}</form></main>;
+}
