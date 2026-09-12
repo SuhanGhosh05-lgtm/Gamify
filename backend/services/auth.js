@@ -3,6 +3,7 @@ import prisma from '../config/prisma.js';
 const gameDataInclude = {
   progression: true,
   universe: true,
+  character: true,
 };
 
 export function findUserByFirebaseUid(firebaseUid) {

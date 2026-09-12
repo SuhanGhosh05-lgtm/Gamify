@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { verifyFirebaseToken } from '../middleware/authMiddleware.js';
 import { completeOnboarding, completeQuest, createEntry, deleteEntry, enterUniverse, universeForUser, updateEntry } from '../services/universe.js';
+import { getCharacterStatus } from '../services/character.js';
 
 const router = Router();
 router.use(verifyFirebaseToken);
@@ -39,6 +40,8 @@ const entryData = (type, body, partial = false) => {
 const respond = (handler) => async (req, res, next) => { try { await handler(req, res); } catch (error) { if (error.message) return res.status(400).json({ success: false, message: error.message }); next(error); } };
 
 router.get('/', respond(async (req, res) => {
+  const characterStatus = await getCharacterStatus(req.user.uid);
+  if (characterStatus && !characterStatus.characterComplete) return res.status(403).json({ success: false, code: 'CHARACTER_REQUIRED', message: 'Create your character before entering the Universe.' });
   const universe = await universeForUser(req.user.uid);
   if (!universe) return res.status(404).json({ success: false, message: 'Universe not found. Please register first.' });
   return res.json({ success: true, universe });
@@ -47,6 +50,7 @@ router.get('/', respond(async (req, res) => {
 router.get('/entry', respond(async (req, res) => {
   const decision = await enterUniverse(req.user.uid);
   if (!decision) return res.status(404).json({ success: false, message: 'User not found. Please register first.' });
+  if (decision.characterRequired) return res.status(403).json({ success: false, code: 'CHARACTER_REQUIRED', message: 'Create your character before entering the Universe.' });
   return res.json({ success: true, ...decision });
 }));
 

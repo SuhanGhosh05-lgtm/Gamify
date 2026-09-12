@@ -18,9 +18,11 @@ model User {
   lastLoginAt         DateTime?
   lastActivityAt      DateTime?
   onboardingCompleted Boolean      @default(false)
+  characterComplete   Boolean      @default(false)
   isActive            Boolean      @default(true)
   progression         Progression?
   universe            Universe?
+  character           Character?
 }
 
 model Progression {
@@ -40,6 +42,24 @@ model Progression {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Character {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  name        String
+  gender      String   @default("male")
+  skinColor   String
+  hairStyle   String
+  hairColor   String
+  outfitStyle String
+  outfitColor String
+  accessory   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Universe {

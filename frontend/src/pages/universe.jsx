@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Navbar from '../components/navbar';
 import { useAuth } from '../context/auth-context';
 import { authenticatedRequest } from '../services/api';
@@ -17,6 +17,7 @@ function Quest({ quest, onComplete }) {
 export default function Universe() {
   const { firebaseUser } = useAuth();
   const { state } = useLocation();
+  const navigate = useNavigate();
   const [universe, setUniverse] = useState(state?.universe || null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,9 +25,12 @@ export default function Universe() {
     if (!firebaseUser) return;
     setLoading(true); setError('');
     try { setUniverse((await authenticatedRequest('/api/universe', firebaseUser)).universe); }
-    catch (requestError) { setError(requestError.message); }
+    catch (requestError) {
+      if (requestError.code === 'CHARACTER_REQUIRED') navigate('/character', { replace: true });
+      else setError(requestError.message);
+    }
     finally { setLoading(false); }
-  }, [firebaseUser]);
+  }, [firebaseUser, navigate]);
   useEffect(() => { if (!state?.universe) load(); else setLoading(false); }, [load, state?.universe]);
   const complete = async (id) => {
     try { await authenticatedRequest(`/api/universe/quests/${id}/complete`, firebaseUser, { method: 'POST' }); await load(); }

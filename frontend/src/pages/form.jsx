@@ -21,9 +21,13 @@ export default function OnboardingForm() {
   useEffect(() => {
     if (!firebaseUser || state?.taxonomy) return;
     authenticatedRequest('/api/universe/entry', firebaseUser).then((result) => {
+      if (result.characterRequired) { navigate('/character', { replace: true }); return; }
       if (result.onboardingCompleted) navigate('/universe', { replace: true, state: { universe: result.universe } });
       else setTaxonomy(result.taxonomy);
-    }).catch((requestError) => setError(requestError.message)).finally(() => setLoading(false));
+    }).catch((requestError) => {
+      if (requestError.code === 'CHARACTER_REQUIRED') navigate('/character', { replace: true });
+      else setError(requestError.message);
+    }).finally(() => setLoading(false));
   }, [firebaseUser, navigate, state?.taxonomy]);
 
   const toggle = (setter, key) => setter((previous) => {

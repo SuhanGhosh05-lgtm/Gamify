@@ -60,8 +60,9 @@ export function validateOnboardingSelections(selections) {
 }
 
 export async function enterUniverse(firebaseUid) {
-  const user = await prisma.user.findUnique({ where: { firebaseUid }, select: { onboardingCompleted: true } });
+  const user = await prisma.user.findUnique({ where: { firebaseUid }, select: { onboardingCompleted: true, characterComplete: true } });
   if (!user) return null;
+  if (!user.characterComplete) return { characterRequired: true };
   return user.onboardingCompleted
     ? { onboardingCompleted: true, universe: await universeForUser(firebaseUid) }
     : { onboardingCompleted: false, taxonomy: interestTaxonomy };

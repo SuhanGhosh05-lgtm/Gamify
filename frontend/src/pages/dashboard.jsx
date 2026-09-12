@@ -24,10 +24,20 @@ export default function Dashboard() {
   if (loading) return <div className="page dashboard-page"><Navbar /><p className="page-loader">Loading your journey…</p></div>;
 
   const exploreStats = () => document.getElementById('journey-stats')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const requireCharacter = async () => {
+    const result = await authenticatedRequest('/api/character/status', firebaseUser);
+    if (!result.characterComplete) { navigate('/character'); return false; }
+    return true;
+  };
+  const exploreJourney = async () => {
+    try { if (await requireCharacter()) exploreStats(); }
+    catch (requestError) { setError(requestError.message); }
+  };
   const enterUniverse = async () => {
     if (!firebaseUser || enteringUniverse) return;
     setEnteringUniverse(true); setError('');
     try {
+      if (!await requireCharacter()) return;
       const result = await authenticatedRequest('/api/universe/entry', firebaseUser);
       navigate(result.onboardingCompleted ? '/universe' : '/onboarding', { state: result.onboardingCompleted ? { universe: result.universe } : { taxonomy: result.taxonomy } });
     } catch (requestError) { setError(requestError.message); }
@@ -39,7 +49,7 @@ export default function Dashboard() {
       <Navbar />
       {firebaseUser && statsLoading && <p className="page-loader">Restoring your universe…</p>}
       {firebaseUser && stats && !statsLoading && <>
-        <Hero onExplore={exploreStats} playerName={stats.user.displayName || 'Adventurer'} />
+        <Hero onExplore={exploreJourney} playerName={stats.user.displayName || 'Adventurer'} />
         <UserStats data={stats} onEnterUniverse={enterUniverse} />
       </>}
       {firebaseUser && error && <main className="dashboard-error"><h1>Your journey needs attention.</h1><p>{error}</p></main>}
