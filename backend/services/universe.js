@@ -24,6 +24,11 @@ const requiredName = (value, label) => {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`);
   return value.trim();
 };
+const optionalDescription = (value, label) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new Error(`${label} must be text.`);
+  return value.trim() || null;
+};
 
 export function validateOnboardingSelections(selections) {
   if (!Array.isArray(selections) || !selections.length) throw new Error('Choose at least one interest.');
@@ -38,6 +43,7 @@ export function validateOnboardingSelections(selections) {
     return {
       interest: interest.name,
       villageName: requiredName(selection.villageName, `A village name for ${interest.name}`),
+      villageDescription: optionalDescription(selection.villageDescription, `The village description for ${interest.name}`),
       subinterests: selection.subinterests.map((chosenSubinterest) => {
         if (!chosenSubinterest || typeof chosenSubinterest.name !== 'string' || subinterests.has(chosenSubinterest.name)) throw new Error('Subinterests must be unique and valid.');
         const subinterest = interest.subinterests.find((item) => item.name === chosenSubinterest.name);
@@ -52,7 +58,12 @@ export function validateOnboardingSelections(selections) {
         return {
           name: subinterest.name,
           wardName: requiredName(chosenSubinterest.wardName, `A ward name for ${subinterest.name}`),
-          topics: chosenSubinterest.topics.map((topic) => ({ name: topic.name, houseName: requiredName(topic.houseName, `A house name for ${topic.name}`) })),
+          wardDescription: optionalDescription(chosenSubinterest.wardDescription, `The ward description for ${subinterest.name}`),
+          topics: chosenSubinterest.topics.map((topic) => ({
+            name: topic.name,
+            houseName: requiredName(topic.houseName, `A house name for ${topic.name}`),
+            houseDescription: optionalDescription(topic.houseDescription, `The house description for ${topic.name}`),
+          })),
         };
       }),
     };
@@ -64,7 +75,7 @@ export async function enterUniverse(firebaseUid) {
   if (!user) return null;
   if (!user.characterComplete) return { characterRequired: true };
   return user.onboardingCompleted
-    ? { onboardingCompleted: true, universe: await universeForUser(firebaseUid) }
+    ? { onboardingCompleted: true, universe: await universeForUser(firebaseUid), taxonomy: interestTaxonomy }
     : { onboardingCompleted: false, taxonomy: interestTaxonomy };
 }
 
@@ -79,13 +90,13 @@ export async function completeOnboarding(firebaseUid, rawSelections, rawUniverse
       if (!universe.universeName) await tx.universe.update({ where: { id: universe.id }, data: { universeName } });
       for (const selection of selections) {
         let village = await tx.village.findFirst({ where: { universeId: universe.id, name: selection.interest } });
-        if (!village) village = await tx.village.create({ data: { universeId: universe.id, name: selection.interest, villageName: selection.villageName } });
+        if (!village) village = await tx.village.create({ data: { universeId: universe.id, name: selection.interest, villageName: selection.villageName, description: selection.villageDescription } });
         for (const selectedSubinterest of selection.subinterests) {
           let ward = await tx.ward.findFirst({ where: { villageId: village.id, name: selectedSubinterest.name } });
-          if (!ward) ward = await tx.ward.create({ data: { villageId: village.id, name: selectedSubinterest.name, wardName: selectedSubinterest.wardName } });
+          if (!ward) ward = await tx.ward.create({ data: { villageId: village.id, name: selectedSubinterest.name, wardName: selectedSubinterest.wardName, description: selectedSubinterest.wardDescription } });
           for (const topic of selectedSubinterest.topics) {
             const house = await tx.house.findFirst({ where: { wardId: ward.id, name: topic.name } });
-            if (!house) await tx.house.create({ data: { wardId: ward.id, name: topic.name, houseName: topic.houseName } });
+            if (!house) await tx.house.create({ data: { wardId: ward.id, name: topic.name, houseName: topic.houseName, description: topic.houseDescription } });
           }
         }
       }
@@ -100,7 +111,7 @@ export async function completeOnboarding(firebaseUid, rawSelections, rawUniverse
 }
 
 async function ownedUniverse(firebaseUid) {
-  return prisma.universe.findFirst({ where: { user: { firebaseUid } }, select: { id: true, userId: true } });
+  return prisma.universe.findFirst({ where: { user: { firebaseUid, onboardingCompleted: true } }, select: { id: true, userId: true } });
 }
 
 const ownership = {
@@ -113,11 +124,28 @@ const ownership = {
 export async function createEntry(type, parentId, data, firebaseUid) {
   const universe = await ownedUniverse(firebaseUid);
   if (!universe) return null;
-  if (type === 'village') return prisma.village.create({ data: { ...data, universeId: universe.id } });
+  if (type === 'village') {
+    if (!findTaxonomyInterest(data.name)) throw new Error('Choose a valid Village option.');
+    if (await prisma.village.findFirst({ where: { universeId: universe.id, name: data.name }, select: { id: true } })) throw new Error('This village already exists in your Universe.');
+    return prisma.village.create({ data: { ...data, universeId: universe.id } });
+  }
 
   const parentType = type === 'ward' ? 'village' : type === 'house' ? 'ward' : 'house';
-  const parent = await prisma[parentType].findFirst({ where: ownership[parentType](parentId, firebaseUid), select: { id: true } });
+  const parent = await prisma[parentType].findFirst({
+    where: ownership[parentType](parentId, firebaseUid),
+    select: type === 'house' ? { id: true, name: true, village: { select: { name: true } } } : { id: true, name: true },
+  });
   if (!parent) return null;
+  if (type === 'ward') {
+    const interest = findTaxonomyInterest(parent.name);
+    if (!interest?.subinterests.some((item) => item.name === data.name)) throw new Error('Choose a valid Ward option for this Village.');
+  }
+  if (type === 'house') {
+    const interest = findTaxonomyInterest(parent.village.name);
+    const ward = interest?.subinterests.find((item) => item.name === parent.name);
+    if (!ward?.topics.includes(data.name)) throw new Error('Choose a valid House option for this Ward.');
+  }
+  if (type !== 'quest' && await prisma[type].findFirst({ where: { [`${parentType}Id`]: parent.id, name: data.name }, select: { id: true } })) throw new Error(`This ${type} already exists in the selected ${parentType}.`);
   return prisma[type].create({ data: { ...data, [`${parentType}Id`]: parent.id } });
 }
 

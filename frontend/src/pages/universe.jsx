@@ -1,52 +1,106 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/navbar';
 import { useAuth } from '../context/auth-context';
 import { authenticatedRequest } from '../services/api';
 
+const MAX_NAME_LENGTH = 120;
+const MAX_DESCRIPTION_LENGTH = 2000;
+const displayName = (entry, type) => entry[`${type}Name`] || entry.name;
+const statsForHouses = (houses = []) => {
+  const quests = houses.flatMap((house) => house.currentQuests || []);
+  const completed = quests.filter((quest) => quest.completed);
+  const totalQuests = quests.length;
+  return {
+    completedQuests: completed.length, totalQuests,
+    percentage: totalQuests ? Math.round((completed.length / totalQuests) * 100) : 0,
+    xpEarned: completed.reduce((total, quest) => total + (quest.xpReward || 0), 0),
+    completedHouses: houses.filter((house) => house.currentQuests?.length && house.currentQuests.every((quest) => quest.completed)).length,
+  };
+};
+
+function Progress({ stats }) {
+  return <div className="hierarchy-progress"><div className="progress-label"><span>Progress</span><strong>{stats.percentage}%</strong></div><div className="progress-track" role="progressbar" aria-label="Quest completion progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={stats.percentage}><span style={{ width: `${stats.percentage}%` }} /></div></div>;
+}
+
 function Quest({ quest, onComplete }) {
-  return <li className={`quest-item${quest.completed ? ' complete' : ''}`}>
-    <div><strong>{quest.title}</strong>{quest.description && <p>{quest.description}</p>}<small>{quest.xpReward} XP{quest.difficulty ? ` · ${quest.difficulty}` : ''}</small></div>
-    <div className="quest-actions">
-      {!quest.completed && <button onClick={() => onComplete(quest.id)}>Complete</button>}
-      {quest.completed && <span>Completed</span>}
-    </div>
-  </li>;
+  return <li className={`quest-item${quest.completed ? ' complete' : ''}`}><div><strong>{quest.title}</strong>{quest.description && <p>{quest.description}</p>}<small>{quest.xpReward} XP{quest.difficulty ? ` · ${quest.difficulty}` : ''}</small></div><div className="quest-actions">{!quest.completed && <button type="button" onClick={() => onComplete(quest.id)}>Complete</button>}{quest.completed && <span>Completed</span>}</div></li>;
+}
+
+function DetailDialog({ detail, onClose }) {
+  if (!detail) return null;
+  const { type, entry, stats, villageName, wardName } = detail;
+  const title = displayName(entry, type);
+  const parent = type === 'ward' ? `Village: ${villageName}` : type === 'house' ? `Ward: ${wardName} · Village: ${villageName}` : null;
+  const items = [['Completed quests', `${stats.completedQuests} / ${stats.totalQuests}`], ['XP earned', `${stats.xpEarned} XP`], ...(type === 'village' ? [['Wards', entry.wards.length]] : []), ...(type === 'ward' ? [['Houses', entry.houses.length], ['Completed houses', stats.completedHouses]] : [])];
+  const currentQuest = type === 'house' ? entry.currentQuests.find((quest) => !quest.completed) : null;
+  return <div className="universe-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="universe-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title" onMouseDown={(event) => event.stopPropagation()}><button className="universe-modal-close" type="button" onClick={onClose} aria-label={`Close ${type} details`}>×</button><p className="eyebrow">{type} details</p><h2 id="detail-title">{title}</h2>{parent && <p className="detail-parent">{parent}</p>}<p className="detail-description">{entry.description || 'No description available yet.'}</p><Progress stats={stats} /><div className="detail-stat-grid">{items.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>{currentQuest && <div className="current-quest"><span>Current quest</span><strong>{currentQuest.title}</strong>{currentQuest.difficulty && <small>{currentQuest.difficulty}</small>}</div>}<div className="detail-actions"><button className="outline-button" type="button" onClick={() => onClose({ kind: 'edit', detail })}>Edit {type}</button><button className="danger-button" type="button" onClick={() => onClose({ kind: 'delete', detail })}>Delete {type}</button></div>{type === 'house' && <button className="primary-button coming-soon-button" type="button" disabled aria-disabled="true">Add Quests <small>Coming soon</small></button>}</section></div>;
+}
+
+function CreateDialog({ dialog, form, error, saving, onChange, onClose, onSubmit }) {
+  if (!dialog) return null;
+  if (dialog.mode === 'select' && form.stage === 'choices') return <div className="universe-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="universe-modal create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title" onMouseDown={(event) => event.stopPropagation()}><button className="universe-modal-close" type="button" onClick={onClose} disabled={saving} aria-label="Close option selection">×</button><p className="eyebrow">Expand your universe</p><h2 id="create-title">Choose {dialog.type}s</h2>{dialog.parentName && <p className="detail-parent">Inside {dialog.parentName}</p>}<div className="option-selector">{dialog.options.map((option) => <label className={`option-choice${dialog.existing.includes(option) ? ' unavailable' : ''}`} key={option}><input type="checkbox" checked={dialog.existing.includes(option) || form.selected.includes(option)} disabled={saving || dialog.existing.includes(option)} onChange={() => onChange('selected', form.selected.includes(option) ? form.selected.filter((item) => item !== option) : [...form.selected, option])} /> {option}{dialog.existing.includes(option) && <small>Already added</small>}</label>)}</div>{!dialog.options.length && <p className="universe-error">No compatible options are available for this location.</p>}{error && <p className="universe-error" role="alert">{error}</p>}<div className="modal-actions"><button className="back-form-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="button" onClick={() => onChange('stage', 'details')} disabled={saving || !form.selected.length}>Next <span aria-hidden="true">→</span></button></div></section></div>;
+  if (dialog.mode === 'select') return <div className="universe-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="universe-modal create-modal" role="dialog" aria-modal="true" aria-labelledby="metadata-title" onMouseDown={(event) => event.stopPropagation()}><button className="universe-modal-close" type="button" onClick={onClose} disabled={saving}>×</button><p className="eyebrow">Name your new places</p><h2 id="metadata-title">Location details</h2><form onSubmit={onSubmit} noValidate>{form.selected.map((option) => { const metadata = form.metadata[option] || { name: option, description: '' }; return <section className="selection-metadata" key={option}><h3>{option}</h3><label className="modal-field">{dialog.type} name<input className="name-input" value={metadata.name} onChange={(event) => onChange('metadata', { ...form.metadata, [option]: { ...metadata, name: event.target.value } })} maxLength={MAX_NAME_LENGTH} disabled={saving} required /></label><label className="modal-field">Description <span>(optional)</span><textarea className="name-input" value={metadata.description} onChange={(event) => onChange('metadata', { ...form.metadata, [option]: { ...metadata, description: event.target.value } })} maxLength={MAX_DESCRIPTION_LENGTH} disabled={saving} /></label></section>; })}{error && <p className="universe-error" role="alert">{error}</p>}<div className="modal-actions"><button className="back-form-button" type="button" onClick={() => onChange('stage', 'choices')} disabled={saving}>Back</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Adding…' : `Add selected ${dialog.type}s`}</button></div></form></section></div>;
+  if (dialog.mode === 'edit') return <div className="universe-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="universe-modal create-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title" onMouseDown={(event) => event.stopPropagation()}><button className="universe-modal-close" type="button" onClick={onClose} disabled={saving}>×</button><p className="eyebrow">Location metadata</p><h2 id="edit-title">Edit {dialog.type}</h2><form onSubmit={onSubmit} noValidate><label className="modal-field">Name<input className="name-input" value={form.name} onChange={(event) => onChange('name', event.target.value)} maxLength={MAX_NAME_LENGTH} disabled={saving} autoFocus /></label><label className="modal-field">Description <span>(optional)</span><textarea className="name-input" value={form.description} onChange={(event) => onChange('description', event.target.value)} maxLength={MAX_DESCRIPTION_LENGTH} disabled={saving} /></label>{error && <p className="universe-error" role="alert">{error}</p>}<div className="modal-actions"><button className="back-form-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div></form></section></div>;
+  if (dialog.mode === 'delete') return <div className="universe-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="universe-modal create-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" onMouseDown={(event) => event.stopPropagation()}><button className="universe-modal-close" type="button" onClick={onClose} disabled={saving}>×</button><p className="eyebrow">Permanent action</p><h2 id="delete-title">Delete {displayName(dialog.detail.entry, dialog.type)}?</h2><p className="detail-description">Deleting this {dialog.type} also deletes its nested children: {dialog.type === 'village' ? 'Wards, Houses, and Quests' : dialog.type === 'ward' ? 'Houses and Quests' : 'Quests'}. This is enforced by the database cascade.</p>{error && <p className="universe-error" role="alert">{error}</p>}<div className="modal-actions"><button className="back-form-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="danger-button" type="button" onClick={onSubmit} disabled={saving}>{saving ? 'Deleting…' : `Delete ${dialog.type}`}</button></div></section></div>;
+  const label = dialog.type[0].toUpperCase() + dialog.type.slice(1);
+  return <div className="universe-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="universe-modal create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title" onMouseDown={(event) => event.stopPropagation()}><button className="universe-modal-close" type="button" onClick={onClose} disabled={saving} aria-label={`Close add ${dialog.type} form`}>×</button><p className="eyebrow">Expand your universe</p><h2 id="create-title">Add {label}</h2>{dialog.parentName && <p className="detail-parent">Inside {dialog.parentName}</p>}<form onSubmit={onSubmit} noValidate><label className="modal-field">{label} name<input className="name-input" value={form.name} onChange={(event) => onChange('name', event.target.value)} maxLength={MAX_NAME_LENGTH} disabled={saving} autoFocus /></label><label className="modal-field">Description <span>(optional)</span><textarea className="name-input" value={form.description} onChange={(event) => onChange('description', event.target.value)} maxLength={MAX_DESCRIPTION_LENGTH} disabled={saving} /></label>{error && <p className="universe-error" role="alert">{error}</p>}<div className="modal-actions"><button className="back-form-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : `Add ${label}`}</button></div></form></section></div>;
+}
+
+function MapDecoration() {
+  return <div className="map-decoration" aria-hidden="true"><span className="map-river" /><span className="map-road map-road-one" /><span className="map-road map-road-two" /><span className="map-forest forest-one">♣ ♣ ♣</span><span className="map-forest forest-two">♣ ♣ ♣ ♣</span><span className="map-rock rock-one">◆</span><span className="map-rock rock-two">◆</span></div>;
 }
 
 export default function Universe() {
-  const { firebaseUser } = useAuth();
-  const { state } = useLocation();
-  const navigate = useNavigate();
-  const [universe, setUniverse] = useState(state?.universe || null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => {
-    if (!firebaseUser) return;
-    setLoading(true); setError('');
-    try { setUniverse((await authenticatedRequest('/api/universe', firebaseUser)).universe); }
-    catch (requestError) {
-      if (requestError.code === 'CHARACTER_REQUIRED') navigate('/character', { replace: true });
-      else setError(requestError.message);
+  const { firebaseUser } = useAuth(); const navigate = useNavigate();
+  const [universe, setUniverse] = useState(null); const [taxonomy, setTaxonomy] = useState([]); const [error, setError] = useState(''); const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState(null); const [dialog, setDialog] = useState(null); const [form, setForm] = useState({ name: '', description: '', selected: [], metadata: {}, stage: 'choices' }); const [formError, setFormError] = useState(''); const [saving, setSaving] = useState(false);
+  const load = useCallback(async () => { if (!firebaseUser) return; setLoading(true); setError(''); try { const result = await authenticatedRequest('/api/universe', firebaseUser); if (!result.onboardingCompleted) { navigate('/onboarding', { replace: true, state: { taxonomy: result.taxonomy } }); return; } setUniverse(result.universe); setTaxonomy(result.taxonomy || []); } catch (requestError) { if (requestError.code === 'CHARACTER_REQUIRED') navigate('/character', { replace: true }); else setError(requestError.message); } finally { setLoading(false); } }, [firebaseUser, navigate]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const closeOnEscape = (event) => { if (event.key === 'Escape') { setDetail(null); setDialog(null); } }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape); }, []);
+  const complete = async (id) => { try { await authenticatedRequest(`/api/universe/quests/${id}/complete`, firebaseUser, { method: 'POST' }); await load(); } catch (requestError) { setError(requestError.message); } };
+  const openCreate = (type, parentId = null, parentName = '') => {
+    const parent = type === 'ward' ? universe?.villages.find((village) => village.id === parentId) : type === 'house' ? universe?.villages.flatMap((village) => village.wards).find((ward) => ward.id === parentId) : null;
+    const interest = type === 'village' ? null : taxonomy.find((item) => item.name === (type === 'ward' ? parent?.name : universe?.villages.find((village) => village.wards.some((ward) => ward.id === parentId))?.name));
+    const ward = type === 'house' ? interest?.subinterests.find((item) => item.name === parent?.name) : null;
+    const options = type === 'village' ? taxonomy.map((item) => item.name) : type === 'ward' ? (interest?.subinterests || []).map((item) => item.name) : ward?.topics || [];
+    const existing = type === 'village' ? universe.villages.map((item) => item.name) : type === 'ward' ? parent?.wards.map((item) => item.name) || [] : parent?.houses.map((item) => item.name) || [];
+    setForm({ name: '', description: '', selected: [], metadata: {}, stage: 'choices' }); setFormError(''); setDialog({ mode: 'select', type, parentId, parentName, options, existing });
+  };
+  const closeDialogs = (action) => {
+    if (saving) return;
+    if (action?.kind === 'edit') { setDetail(null); setForm({ name: displayName(action.detail.entry, action.detail.type), description: action.detail.entry.description || '', selected: [], metadata: {}, stage: 'choices' }); setDialog({ mode: 'edit', type: action.detail.type, detail: action.detail }); return; }
+    if (action?.kind === 'delete') { setDetail(null); setFormError(''); setDialog({ mode: 'delete', type: action.detail.type, detail: action.detail }); return; }
+    setDetail(null); setDialog(null);
+  };
+  const addEntry = async (event) => {
+    event?.preventDefault(); if (saving || !dialog) return;
+    const name = form.name.trim(); const description = form.description.trim(); const typeLabel = dialog.type[0].toUpperCase() + dialog.type.slice(1);
+    if (dialog.mode === 'edit' && !name) { setFormError(`${typeLabel} name is required.`); return; }
+    if (dialog.mode === 'edit' && (name.length > MAX_NAME_LENGTH || description.length > MAX_DESCRIPTION_LENGTH)) { setFormError('Please shorten the entered text.'); return; }
+    if (dialog.mode === 'select') {
+      const invalid = form.selected.find((option) => { const metadata = form.metadata[option] || { name: option, description: '' }; return !metadata.name.trim() || metadata.name.trim().length > MAX_NAME_LENGTH || metadata.description.trim().length > MAX_DESCRIPTION_LENGTH; });
+      if (invalid) { setFormError(`Enter a valid name and description length for ${invalid}.`); return; }
     }
-    finally { setLoading(false); }
-  }, [firebaseUser, navigate]);
-  useEffect(() => { if (!state?.universe) load(); else setLoading(false); }, [load, state?.universe]);
-  const complete = async (id) => {
-    try { await authenticatedRequest(`/api/universe/quests/${id}/complete`, firebaseUser, { method: 'POST' }); await load(); }
-    catch (requestError) { setError(requestError.message); }
+    setSaving(true); setFormError('');
+    let createdAny = false;
+    try {
+      if (dialog.mode === 'delete') { await authenticatedRequest(`/api/universe/${dialog.type}s/${dialog.detail.entry.id}`, firebaseUser, { method: 'DELETE' }); await load(); setDialog(null); return; }
+      if (dialog.mode === 'edit') { await authenticatedRequest(`/api/universe/${dialog.type}s/${dialog.detail.entry.id}`, firebaseUser, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description }) }); await load(); setDialog(null); return; }
+      for (const selectedName of form.selected) { const metadata = form.metadata[selectedName] || { name: selectedName, description: '' }; const body = { name: selectedName, displayName: metadata.name.trim(), description: metadata.description.trim() }; if (dialog.type === 'ward') body.villageId = dialog.parentId; if (dialog.type === 'house') body.wardId = dialog.parentId; await authenticatedRequest(`/api/universe/${dialog.type}s`, firebaseUser, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); createdAny = true; }
+      await load();
+      setDialog(null);
+    } catch (requestError) { if (createdAny) await load(); setFormError(requestError.message); } finally { setSaving(false); }
   };
   if (!firebaseUser) return <div className="page dashboard-page"><Navbar /><main className="dashboard-error"><h1>Enter your journey first.</h1><Link to="/login">Log in</Link></main></div>;
-  return <div className="page dashboard-page"><Navbar /><main className="universe-view">
-    <p className="eyebrow">Your universe</p><h1>{universe?.universeName || 'Build your world.'}</h1>
-    {loading && <p className="page-loader">Loading your universe…</p>}
-    {error && <p className="universe-error">{error}</p>}
-    {!loading && universe && <>
-      {universe.villages.length ? universe.villages.map((village) => <section className="village-card" key={village.id}><h2>{village.villageName || village.name}</h2>{village.description && <p>{village.description}</p>}
-        {village.wards.length ? village.wards.map((ward) => <div className="ward-card" key={ward.id}><h3>{ward.wardName || ward.name}</h3>{ward.description && <p>{ward.description}</p>}
-          {ward.houses.length ? ward.houses.map((house) => <div className="house-card" key={house.id}><h4>{house.houseName || house.name}</h4>{house.description && <p>{house.description}</p>}
-            {house.currentQuests.length ? <ul>{house.currentQuests.map((quest) => <Quest key={quest.id} quest={quest} onComplete={complete} />)}</ul> : <p className="empty-note">No quests in this house.</p>}
-          </div>) : <p className="empty-note">No houses in this ward.</p>}</div>) : <p className="empty-note">No wards in this village.</p>}</section>) : <section className="village-card empty-state"><h2>Your universe is ready</h2><p>There are no villages yet. Add your first village through the Universe API to begin shaping your world.</p></section>}
-    </>}
-  </main></div>;
+  return <div className="page dashboard-page"><Navbar /><main className="universe-view"><div className="universe-heading"><div><p className="eyebrow">Your universe map</p><h1>{universe?.universeName || 'Build your world.'}</h1><p className="map-instruction">Explore each territory, then open a location to see its journey.</p></div><button className="primary-button" type="button" onClick={() => openCreate('village')} disabled={loading}>Add Village <span aria-hidden="true">+</span></button></div>{loading && <p className="page-loader">Loading your universe…</p>}{error && <p className="universe-error" role="alert">{error}</p>}{!loading && universe && <div className="world-viewport" tabIndex="0" aria-label="Scrollable universe world map"><div className="world-map">{universe.villages.length ? <>{<MapDecoration />}<div className="map-compass" aria-hidden="true"><span>N</span>✦</div><div className="village-territories">{universe.villages.map((village, villageIndex) => {
+    const villageStats = statsForHouses(village.wards.flatMap((ward) => ward.houses));
+    return <section className={`village-territory territory-${villageIndex % 4}`} key={village.id} aria-label={`${displayName(village, 'village')} territory`}><div className="territory-header"><button className="map-location village-location" type="button" onClick={() => setDetail({ type: 'village', entry: village, stats: villageStats })}><span className="location-icon" aria-hidden="true">⌂</span><span>{displayName(village, 'village')}</span><small>{villageStats.percentage}% complete</small></button><button className="map-add-button" type="button" onClick={() => openCreate('ward', village.id, displayName(village, 'village'))}>+ Ward</button></div><p className="territory-description">{village.description || 'No description available yet.'}</p><Progress stats={villageStats} />{village.wards.length ? <div className="ward-settlements">{village.wards.map((ward, wardIndex) => {
+      const wardStats = statsForHouses(ward.houses);
+      return <section className={`ward-settlement ward-${wardIndex % 3}`} key={ward.id}><div className="ward-header"><button className="map-location ward-location" type="button" onClick={() => setDetail({ type: 'ward', entry: ward, stats: wardStats, villageName: displayName(village, 'village') })}><span className="location-icon" aria-hidden="true">✦</span><span>{displayName(ward, 'ward')}</span><small>{wardStats.completedQuests}/{wardStats.totalQuests} quests</small></button><button className="map-add-button" type="button" onClick={() => openCreate('house', ward.id, displayName(ward, 'ward'))}>+ House</button></div><Progress stats={wardStats} />{ward.houses.length ? <div className="house-landmarks">{ward.houses.map((house) => {
+        const houseStats = statsForHouses([house]);
+        return <section className="house-landmark" key={house.id}><button className="map-location house-location" type="button" onClick={() => setDetail({ type: 'house', entry: house, stats: houseStats, wardName: displayName(ward, 'ward'), villageName: displayName(village, 'village') })}><span className="house-roof" aria-hidden="true" /><span className="house-wall" aria-hidden="true" /><span className="house-name">{displayName(house, 'house')}</span><small>{houseStats.percentage}% · {houseStats.completedQuests}/{houseStats.totalQuests}</small></button>{house.currentQuests.length ? <div className="map-quest-list" aria-label={`${displayName(house, 'house')} quests`}>{house.currentQuests.map((quest) => <button className={`map-quest${quest.completed ? ' complete' : ''}`} type="button" key={quest.id} onClick={() => !quest.completed && complete(quest.id)} disabled={quest.completed} aria-label={quest.completed ? `${quest.title}, completed` : `Complete ${quest.title}`}><span aria-hidden="true">{quest.completed ? '✓' : '!'}</span>{quest.title}</button>)}</div> : <p className="map-empty-note">No quests yet</p>}</section>;
+      })}</div> : <p className="map-empty-note">No houses in this ward yet.</p>}</section>;
+    })}</div> : <p className="map-empty-note territory-empty">No wards in this village yet. Add one to create a settlement.</p>}</section>;
+  })}</div></> : <section className="map-empty-world"><span aria-hidden="true">✦</span><h2>Your universe is ready</h2><p>Start by placing your first village on the map.</p></section>}</div></div>}</main><DetailDialog detail={detail} onClose={closeDialogs} /><CreateDialog dialog={dialog} form={form} error={formError} saving={saving} onChange={(field, value) => setForm((previous) => ({ ...previous, [field]: value }))} onClose={closeDialogs} onSubmit={addEntry} /></div>;
 }
